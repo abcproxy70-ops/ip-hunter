@@ -215,7 +215,7 @@ class SelectelProvider(BaseProvider):
 
     def list_ips(self) -> list[ProviderResult]:
         """List all active floating IPs for this project."""
-        url = f"{self._base}/v2/floatingips/projects/{self._project_id}"
+        url = f"{self._base}/v2/floatingips"
         if self.session is None: return []
         try:
             resp = self.session.get(url, timeout=self.timeout)
