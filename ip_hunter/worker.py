@@ -131,7 +131,7 @@ def provider_worker(provider: BaseProvider, subnet_set: set[IPv4Network],
     region_switch = random.randint(5, 10)
 
     # Очистка мусорных IP перед стартом — освобождаем квоты
-    _cleanup_stale_ips(provider, subnet_set, state, thread_name, thread_label)
+    _cleanup_stale_ips(provider, subnet_set, state, thread_name, thread_label, limiter)
 
     log_info(f"{thread_name} Старт (регионы: {regions}, batch={batch_sz})")
 
@@ -215,25 +215,24 @@ def _do_single(provider, subnet_set, cfg, state, region, n,
         _delete_async(provider, result.resource_id, state, thread_label)
 
 def _cleanup_stale_ips(provider: BaseProvider, subnet_set: set[IPv4Network],
-                       state: SharedState, thread_name: str, thread_label: str) -> None:
+                       state: SharedState, thread_name: str, thread_label: str,
+                       limiter: AdaptiveRateLimiter) -> None:
     """Delete all non-target floating IPs to free quotas before hunting."""
+    limiter.wait_if_needed(1)
     try:
         existing = provider.list_ips()
     except Exception as exc:
-        log_debug(f"{thread_name} list_ips не поддерживается или ошибка: {exc}")
+        log_debug(f"{thread_name} list_ips ошибка: {exc}")
         return
-    if not existing:
-        return
+    if not existing: return
     stale = [ip for ip in existing if not fast_match(ip.ip, subnet_set)]
     if not stale:
-        log_info(f"{thread_name} Активных мусорных IP нет ({len(existing)} всего)")
+        log_info(f"{thread_name} Мусорных IP нет ({len(existing)} активных)")
         return
-    log_info(f"{thread_name} Найдено {len(stale)} мусорных IP из {len(existing)}, удаляем...")
+    log_info(f"{thread_name} Удаляем {len(stale)} мусорных IP из {len(existing)}...")
     for ip in stale:
         _delete_async(provider, ip.resource_id, state, thread_label)
-    # Небольшая пауза чтобы delete-потоки начали работу
     time.sleep(2)
-    log_info(f"{thread_name} Очистка мусорных IP запущена")
 
 def _tg_notify(cfg: dict, text: str) -> None:
     """Send telegram notification if configured."""

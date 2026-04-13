@@ -214,7 +214,7 @@ class SelectelProvider(BaseProvider):
         return self.cfg.get("regions", ["ru-2", "ru-3"])
 
     def list_ips(self) -> list[ProviderResult]:
-        """List all active floating IPs for this project."""
+        """List all active floating IPs. Returns [] if not supported (403/405)."""
         url = f"{self._base}/v2/floatingips"
         if self.session is None: return []
         try:
@@ -222,6 +222,8 @@ class SelectelProvider(BaseProvider):
             if resp.status_code == 401:
                 self._refresh_and_retry()
                 resp = self.session.get(url, timeout=self.timeout)
+            if resp.status_code in (403, 405):
+                return []  # Токен без доступа к list — это нормально
             if resp.status_code != 200:
                 log_debug(f"[Selectel] list_ips HTTP {resp.status_code}")
                 return []
@@ -230,7 +232,7 @@ class SelectelProvider(BaseProvider):
                                    region=f.get("region", ""), raw=f)
                     for f in fips if f.get("id") and f.get("floating_ip_address")]
         except Exception as exc:
-            log_debug(f"[Selectel] list_ips error: {exc}")
+            log_debug(f"[Selectel] list_ips: {exc}")
             return []
 
     def create_ip(self, region: str) -> ProviderResult:
