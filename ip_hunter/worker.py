@@ -144,6 +144,9 @@ def provider_worker(
     batch_sz = getattr(provider, 'batch_size', 1) if is_sel else 1
     use_batch = is_sel and batch_sz > 1
 
+    # Очистка мусорных IP перед стартом — освобождаем квоту
+    _cleanup_stale_ips(provider, subnet_set, state, thread_name, thread_label)
+
     mode_str = f" (batch={batch_sz})" if batch_sz > 1 else ""
     log_info(f"{thread_name} Старт{mode_str}")
 
@@ -308,3 +311,43 @@ def _tg_notify(cfg: dict, text: str) -> None:
     a = cfg.get("telegram_admin_id", "")
     if t and a:
         send_telegram(t, a, text)
+
+
+def _cleanup_stale_ips(provider: BaseProvider, subnet_set: set[IPv4Network],
+                       state: SharedState, thread_name: str, thread_label: str) -> None:
+    """Удалить все мусорные floating IP при старте — освободить квоту."""
+    try:
+        existing = provider.list_ips()
+    except Exception as exc:
+        log_warn(f"{thread_name} list_ips ошибка: {exc}")
+        return
+    if not existing:
+        log_info(f"{thread_name} Мусорных IP нет (list_ips: 0)")
+        return
+
+    # Все IP — мусорные (не совпадают с целевой подсетью) — удаляем
+    stale = [ip for ip in existing if not fast_match(ip.ip, subnet_set)]
+    target = [ip for ip in existing if fast_match(ip.ip, subnet_set)]
+
+    if target:
+        log_info(f"{thread_name} Найдено {len(target)} целевых IP — НЕ удаляем:")
+        for ip in target:
+            log_ok(f"{thread_name}   {ip.ip} (подсеть совпала)")
+
+    if not stale:
+        log_info(f"{thread_name} Мусорных IP нет ({len(existing)} активных, {len(target)} целевых)")
+        return
+
+    log_info(f"{thread_name} Удаляем {len(stale)} мусорных IP из {len(existing)}...")
+    deleted = 0
+    for ip in stale:
+        if _shutdown:
+            break
+        try:
+            provider.delete_ip(ip.resource_id)
+            state.inc_deleted(thread_label)
+            deleted += 1
+        except Exception as exc:
+            log_debug(f"{thread_name} Ошибка удаления {ip.ip}: {exc}")
+        time.sleep(0.5)
+    log_ok(f"{thread_name} Очистка: удалено {deleted}/{len(stale)}")

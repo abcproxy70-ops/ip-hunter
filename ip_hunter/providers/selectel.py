@@ -325,28 +325,40 @@ class SelectelProvider(BaseProvider):
                 raise RuntimeError(f"Delete HTTP {resp.status_code}")
             return
 
+    # Регионы Neutron API для list floating IPs
+    NEUTRON_REGIONS = ["ru-1", "ru-2", "ru-3", "ru-7", "ru-8", "ru-9"]
+
     def list_ips(self) -> list[ProviderResult]:
-        urls = []
-        if self._project_id:
-            urls.append(f"{self._base}/v2/floatingips/projects/{self._project_id}")
-        urls.append(f"{self._base}/v2/floatingips")
-        for url in urls:
+        """Получить все floating IP через OpenStack Neutron API.
+
+        Resell API не поддерживает GET list — используем Neutron endpoint
+        из Keystone service catalog: https://{region}.cloud.api.selcloud.ru/network/v2.0/floatingips
+        """
+        all_ips: list[ProviderResult] = []
+        regions_to_check = self.get_regions() or self.NEUTRON_REGIONS
+
+        for region in regions_to_check:
+            neutron_url = f"https://{region}.cloud.api.selcloud.ru/network/v2.0/floatingips"
             try:
-                resp = self.session.get(url, timeout=self.timeout)
+                resp = self.session.get(neutron_url, timeout=15)
                 if resp.status_code == 401:
                     self._refresh_and_retry()
-                    resp = self.session.get(url, timeout=self.timeout)
-                if resp.status_code in (403, 404, 405):
-                    continue
+                    resp = self.session.get(neutron_url, timeout=15)
                 if resp.status_code != 200:
                     continue
                 fips = resp.json().get("floatingips", [])
-                return [
-                    ProviderResult(ip=f["floating_ip_address"], resource_id=f["id"],
-                                   region=f.get("region", ""), raw=f)
-                    for f in fips if f.get("id") and f.get("floating_ip_address")
-                ]
+                for f in fips:
+                    ip = f.get("floating_ip_address", "")
+                    rid = f.get("id", "")
+                    if ip and rid:
+                        all_ips.append(ProviderResult(
+                            ip=ip, resource_id=rid,
+                            region=f.get("region", region), raw=f,
+                        ))
             except Exception as exc:
-                log_debug(f"[Selectel] list_ips {url}: {exc}")
+                log_debug(f"[Selectel] list_ips Neutron {region}: {exc}")
                 continue
-        return []
+
+        if all_ips:
+            log_info(f"[Selectel] [{self._instance_label}] list_ips: {len(all_ips)} IP через Neutron")
+        return all_ips
