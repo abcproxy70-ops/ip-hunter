@@ -140,6 +140,9 @@ class RegruProvider(BaseProvider):
         csrf = self._extract_csrf(s, login_resp)
         log_debug(f"[Regru] CSRF: '{csrf[:24]}' (len={len(csrf)})")
         if not csrf: log_warn("[Regru] CSRF пустой — логин может не сработать")
+        # login.reg.ru проверяет CSRF через cookie + header
+        if csrf:
+            s.cookies.set("csrftoken", csrf, domain=".reg.ru")
         payload: dict = {"login": self._login, "password": self._password}
         auth_hdrs = {**base_hdrs, "x-csrf-token": csrf}
         try: resp = s.post(AUTHENTICATE_URL, json=payload, headers=auth_hdrs, timeout=(10, 30))

@@ -222,9 +222,11 @@ def _cleanup_stale_ips(provider: BaseProvider, subnet_set: set[IPv4Network],
     try:
         existing = provider.list_ips()
     except Exception as exc:
-        log_debug(f"{thread_name} list_ips ошибка: {exc}")
+        log_warn(f"{thread_name} list_ips ошибка: {exc}")
         return
-    if not existing: return
+    if not existing:
+        log_info(f"{thread_name} list_ips вернул 0 IP (квота может быть занята — проверьте панель)")
+        return
     stale = [ip for ip in existing if not fast_match(ip.ip, subnet_set)]
     if not stale:
         log_info(f"{thread_name} Мусорных IP нет ({len(existing)} активных)")

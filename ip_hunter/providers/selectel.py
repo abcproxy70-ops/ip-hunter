@@ -265,32 +265,48 @@ class SelectelProvider(BaseProvider):
 
     def list_ips(self) -> list[ProviderResult]:
         """Получить все активные Floating IP (для предварительной очистки)."""
-        url = f"{self._base}/v2/floatingips"
+        # Пробуем с project_id и без — разные токены имеют разный scope
+        urls = []
+        if self._project_id:
+            urls.append(f"{self._base}/v2/floatingips/projects/{self._project_id}")
+        urls.append(f"{self._base}/v2/floatingips")
 
-        try:
-            resp = self._request("GET", url)
-
-            if resp.status_code == 401:
-                self._refresh_token()
+        for url in urls:
+            try:
                 resp = self._request("GET", url)
 
-            if resp.status_code != 200:
-                return []
+                if resp.status_code == 401:
+                    self._refresh_token()
+                    resp = self._request("GET", url)
 
-            fips = resp.json().get("floatingips", [])
-            return [
-                ProviderResult(
-                    ip=f["floating_ip_address"],
-                    resource_id=f["id"],
-                    region=f.get("region", ""),
-                    raw=f,
-                )
-                for f in fips
-                if f.get("id") and f.get("floating_ip_address")
-            ]
-        except Exception as exc:
-            log_debug(f"[Selectel] list_ips: {exc}")
-            return []
+                if resp.status_code in (403, 404, 405):
+                    log_debug(f"[Selectel] list_ips {url} → {resp.status_code}, пробуем другой URL")
+                    continue
+
+                if resp.status_code != 200:
+                    log_warn(f"[Selectel] list_ips HTTP {resp.status_code}: {resp.text[:200]}")
+                    continue
+
+                fips = resp.json().get("floatingips", [])
+                results = [
+                    ProviderResult(
+                        ip=f["floating_ip_address"],
+                        resource_id=f["id"],
+                        region=f.get("region", ""),
+                        raw=f,
+                    )
+                    for f in fips
+                    if f.get("id") and f.get("floating_ip_address")
+                ]
+                log_debug(f"[Selectel] list_ips: найдено {len(results)} IP")
+                return results
+
+            except Exception as exc:
+                log_debug(f"[Selectel] list_ips {url}: {exc}")
+                continue
+
+        log_warn("[Selectel] list_ips: не удалось получить список IP ни по одному URL")
+        return []
 
     # ── Приватные хелперы ────────────────────────────────────────
 
