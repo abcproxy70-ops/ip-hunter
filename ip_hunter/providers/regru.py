@@ -497,6 +497,7 @@ class RegruProvider(BaseProvider):
         if not csrf:
             log_debug(f"{self._lp}: нет csrftoken, пробую получить...")
             csrf_urls = [
+                "https://www.reg.ru/user/authorize",  # 403 но содержит <meta _csrf> и SESSION_ID
                 "https://www.reg.ru/",
                 "https://cloud.reg.ru/",
                 "https://login.reg.ru/",
@@ -514,14 +515,15 @@ class RegruProvider(BaseProvider):
                             timeout=10,
                             allow_redirects=True,
                         )
+                        # Собираем cookies (SESSION_ID, csrftoken если есть)
                         for cookie in csrf_resp.cookies:
                             self._cookies[cookie.name] = cookie.value
                             if cookie.name == "csrftoken":
                                 csrf = cookie.value
                             if cookie.name == "SESSION_ID":
                                 self._session_id = cookie.value
-                        # Способ 2: парсинг <meta name="_csrf" content="..."> из HTML
-                        if not csrf and csrf_resp.text:
+                        # Парсинг <meta name="_csrf"> из HTML (403 тоже содержит!)
+                        if not csrf and csrf_resp.text and len(csrf_resp.text) > 500:
                             meta_match = re.search(
                                 r'<meta\s+name=["\']_csrf["\'][^>]*content=["\']([^"\']+)',
                                 csrf_resp.text
@@ -534,7 +536,7 @@ class RegruProvider(BaseProvider):
                             if meta_match:
                                 csrf = meta_match.group(1)
                                 self._cookies["csrftoken"] = csrf
-                                log_debug(f"{self._lp}: csrftoken из <meta>: {csrf[:12]}...")
+                                log_debug(f"{self._lp}: csrftoken из <meta> ({csrf_url}): {csrf[:12]}...")
                         if csrf:
                             log_debug(f"{self._lp}: csrftoken от {csrf_url}: {csrf[:12]}...")
                             break
@@ -710,7 +712,11 @@ class RegruProvider(BaseProvider):
         except Exception as exc:
             log_err(f"{self._lp}: повторный authenticate: {exc}")
             return
-        if not result2.get("success"):
+        result_status = result2.get("result", {}).get("status", "")
+        if result_status == "need_captcha":
+            log_err(f"{self._lp}: капча не принята, снова need_captcha")
+            return
+        if not result2.get("success") and result_status != "authenticated":
             log_err(f"{self._lp}: логин после капчи: {result2}")
             return
         self._consecutive_login_failures = 0

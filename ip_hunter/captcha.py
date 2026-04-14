@@ -36,13 +36,21 @@ def detect_captcha(
     headers = {"User-Agent": fingerprint_ua}
     pages_html: list[str] = []
 
-    for url in ("https://login.reg.ru/", "https://login.reg.ru/user/authorize"):
+    # www.reg.ru/user/authorize — основная страница с капчей (может вернуть 403, но HTML с sitekey)
+    # login.reg.ru — может быть альтернативная
+    for url in (
+        "https://www.reg.ru/user/authorize",
+        "https://login.reg.ru/",
+        "https://login.reg.ru/user/authorize",
+    ):
         try:
             resp = session.get(url, headers=headers, timeout=(10, 20))
-            if resp.status_code == 200:
+            # 403 с HTML тоже содержит sitekey (www.reg.ru/user/authorize)
+            if resp.status_code in (200, 403) and len(resp.text) > 500:
                 pages_html.append(resp.text)
+                log_debug(f"[Captcha] {url} → {resp.status_code} ({len(resp.text)} bytes)")
             else:
-                log_debug(f"[Captcha] {url} вернул {resp.status_code}")
+                log_debug(f"[Captcha] {url} вернул {resp.status_code} ({len(resp.text)} bytes)")
         except Exception as exc:
             log_debug(f"[Captcha] Ошибка загрузки {url}: {exc}")
 
