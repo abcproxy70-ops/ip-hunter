@@ -280,10 +280,12 @@ def provider_worker(
                 state.inc_errors(thread_label)
                 err_msg = str(e)
                 if "(429)" in err_msg:
-                    # ── При 429: sleep 60с и повторить (НЕ снижать RPM) ──
-                    provider.errors_in_row += 1
-                    log_warn(f"{thread_name} Rate limit (429) #{provider.errors_in_row} → пауза 60с")
+                    # ── При 429: sleep 60с, сбросить счётчик, повторить ──
+                    # 429 — не ошибка сервера, а rate limit. После паузы лимит сбрасывается.
+                    # НЕ увеличиваем errors_in_row — не нужен circuit breaker на 429.
+                    log_warn(f"{thread_name} Rate limit (429) → пауза 60с")
                     time.sleep(60.0)
+                    provider.errors_in_row = 0  # Лимит сброшен после паузы
                     continue
                 elif "(409)" in err_msg or "quota" in err_msg.lower():
                     log_warn(f"{thread_name} Квота — жду 3с")
