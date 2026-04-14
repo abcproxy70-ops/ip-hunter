@@ -180,7 +180,7 @@ def provider_worker(
                         else:
                             to_delete.append(res.resource_id)
 
-                    # Синхронное удаление (как в v11)
+                    # Синхронное удаление с паузой между запросами
                     for rid in to_delete:
                         if _shutdown:
                             break
@@ -189,6 +189,7 @@ def provider_worker(
                             state.inc_deleted(thread_label)
                         except Exception as de:
                             log_debug(f"{thread_name} Ошибка удаления: {de}")
+                        time.sleep(1.0)  # Пауза между delete чтобы не упереться в rate limit
 
                 # ── Обычный режим (Timeweb, Reg.ru, Selectel batch=1) ──
                 else:
@@ -350,8 +351,13 @@ def _cleanup_stale_ips(provider: BaseProvider, subnet_set: set[IPv4Network],
         except Exception as exc:
             err = str(exc)
             if "429" in err:
-                # При 429 — короткая пауза и продолжаем
-                time.sleep(3)
+                time.sleep(5)
             else:
                 log_debug(f"{thread_name} Ошибка удаления {ip.ip}: {exc}")
     log_ok(f"{thread_name} Очистка: удалено {deleted}/{len(stale)}")
+
+    # Ждём сброс rate limit после массового удаления
+    if deleted > 5:
+        cooldown = min(deleted * 3, 60)
+        log_info(f"{thread_name} Ожидание {cooldown}с после очистки (сброс rate limit)...")
+        _interruptible_sleep(cooldown)
