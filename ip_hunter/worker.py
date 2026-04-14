@@ -325,7 +325,7 @@ def _cleanup_stale_ips(provider: BaseProvider, subnet_set: set[IPv4Network],
         log_info(f"{thread_name} Мусорных IP нет (list_ips: 0)")
         return
 
-    # Все IP — мусорные (не совпадают с целевой подсетью) — удаляем
+    # Мусорные = не совпадают с целевой подсетью
     stale = [ip for ip in existing if not fast_match(ip.ip, subnet_set)]
     target = [ip for ip in existing if fast_match(ip.ip, subnet_set)]
 
@@ -348,6 +348,10 @@ def _cleanup_stale_ips(provider: BaseProvider, subnet_set: set[IPv4Network],
             state.inc_deleted(thread_label)
             deleted += 1
         except Exception as exc:
-            log_debug(f"{thread_name} Ошибка удаления {ip.ip}: {exc}")
-        time.sleep(0.5)
+            err = str(exc)
+            if "429" in err:
+                # При 429 — короткая пауза и продолжаем
+                time.sleep(3)
+            else:
+                log_debug(f"{thread_name} Ошибка удаления {ip.ip}: {exc}")
     log_ok(f"{thread_name} Очистка: удалено {deleted}/{len(stale)}")
