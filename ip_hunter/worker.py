@@ -166,6 +166,7 @@ def provider_worker(
                 if use_batch and batch_sz > 1:
                     results = provider.create_ip_batch(region, batch_sz)
                     provider.errors_in_row = 0
+                    provider._consecutive_429 = 0
 
                     to_delete = []
                     for res in results:
@@ -195,6 +196,7 @@ def provider_worker(
                 else:
                     result = provider.create_ip(region)
                     provider.errors_in_row = 0
+                    provider._consecutive_429 = 0
 
                     if not result.ip or not result.resource_id:
                         state.inc_errors(thread_label)
@@ -280,12 +282,13 @@ def provider_worker(
                 state.inc_errors(thread_label)
                 err_msg = str(e)
                 if "(429)" in err_msg:
-                    # ── При 429: sleep 60с, сбросить счётчик, повторить ──
-                    # 429 — не ошибка сервера, а rate limit. После паузы лимит сбрасывается.
-                    # НЕ увеличиваем errors_in_row — не нужен circuit breaker на 429.
-                    log_warn(f"{thread_name} Rate limit (429) → пауза 60с")
-                    time.sleep(60.0)
-                    provider.errors_in_row = 0  # Лимит сброшен после паузы
+                    # Прогрессивная пауза при повторных 429
+                    _consecutive_429 = getattr(provider, '_consecutive_429', 0) + 1
+                    provider._consecutive_429 = _consecutive_429
+                    pause = min(60 + (_consecutive_429 - 1) * 30, 180)
+                    log_warn(f"{thread_name} Rate limit (429) x{_consecutive_429} → пауза {pause}с")
+                    time.sleep(pause)
+                    provider.errors_in_row = 0
                     continue
                 elif "(409)" in err_msg or "quota" in err_msg.lower():
                     log_warn(f"{thread_name} Квота — жду 3с")
