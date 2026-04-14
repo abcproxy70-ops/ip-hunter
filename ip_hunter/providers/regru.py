@@ -128,11 +128,9 @@ class RegruProvider(BaseProvider):
             try:
                 r = s.get(login_url, headers={"User-Agent": ua}, timeout=(10, 20))
                 log_debug(f"[Regru] {login_url} → {r.status_code}")
-                # Берём любой ответ с телом — CSRF может быть даже в 403
                 if r.status_code == 200:
                     login_resp = r
                     break
-                # 403/другое — всё равно попробуем достать CSRF
                 if login_resp is None and len(r.text) > 500:
                     login_resp = r
             except Exception as exc:
@@ -140,7 +138,6 @@ class RegruProvider(BaseProvider):
         csrf = self._extract_csrf(s, login_resp)
         log_debug(f"[Regru] CSRF: '{csrf[:24]}' (len={len(csrf)})")
         if not csrf: log_warn("[Regru] CSRF пустой — логин может не сработать")
-        # login.reg.ru проверяет CSRF через cookie + header
         if csrf:
             s.cookies.set("csrftoken", csrf, domain=".reg.ru")
         payload: dict = {"login": self._login, "password": self._password}
