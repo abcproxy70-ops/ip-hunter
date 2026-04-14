@@ -117,7 +117,8 @@ def provider_worker(provider: BaseProvider, subnet_set: set[IPv4Network],
     is_sel = isinstance(provider, SelectelProvider)
     batch_sz = getattr(provider, "batch_size", 1) if is_sel else 1
     use_batch = is_sel and batch_sz > 1
-    cost = 1  # 1 HTTP create = 1 слот; delete async — не считается
+    # cost = create + будущие delete (как в старой версии)
+    cost = batch_sz + 1 if use_batch else 2
 
     region_hits: dict[str, int] = {r: 0 for r in regions}
     def pick_region() -> str:
@@ -142,7 +143,7 @@ def provider_worker(provider: BaseProvider, subnet_set: set[IPv4Network],
         local_attempts += 1; regional_counter += 1
         try:
             if use_batch:
-                _do_selectel_batch(provider, subnet_set, cfg, state, regions,
+                _do_selectel_batch(provider, subnet_set, cfg, state, region,
                                    batch_sz, n, thread_name, thread_label, label, region_hits)
             else:
                 _do_single(provider, subnet_set, cfg, state, region, n,
@@ -193,16 +194,26 @@ def provider_worker(provider: BaseProvider, subnet_set: set[IPv4Network],
             region_switch = random.randint(5, 10)
     log_info(f"{thread_name} Завершён ({local_attempts} попыток)")
 
-def _do_selectel_batch(provider, subnet_set, cfg, state, regions, batch_sz,
+def _do_selectel_batch(provider, subnet_set, cfg, state, region, batch_sz,
                        n, thread_name, thread_label, label, region_hits) -> None:
-    """Execute Selectel multi-region batch create, async delete misses."""
-    results = provider.create_ip_multi_region({r: batch_sz for r in regions})
+    """Selectel batch: создать batch_sz IP в одном регионе, проверить, удалить ненужные."""
+    results = provider.create_ip_batch(region, batch_sz)
+    to_delete = []
     for res in results:
         if _process_result(res, subnet_set, provider, cfg, state,
-                           res.region, n, thread_name, thread_label, label):
+                           region, n, thread_name, thread_label, label):
             region_hits[res.region] = region_hits.get(res.region, 0) + 1
         else:
-            _delete_async(provider, res.resource_id, state, thread_label)
+            to_delete.append(res.resource_id)
+    # Синхронное удаление — каждый delete виден rate limiter'у
+    for rid in to_delete:
+        if is_shutdown():
+            break
+        try:
+            provider.delete_ip(rid)
+            state.inc_deleted(thread_label)
+        except Exception as exc:
+            log_debug(f"{thread_name} Ошибка удаления: {exc}")
 
 def _do_single(provider, subnet_set, cfg, state, region, n,
                thread_name, thread_label, label, region_hits) -> None:

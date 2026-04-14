@@ -197,15 +197,10 @@ class SelectelProvider(BaseProvider):
 
         raise RuntimeError("Selectel: пустой ответ floatingips")
 
-    def create_ip_multi_region(self, per_region: dict[str, int]) -> list[ProviderResult]:
-        """Создать IP в нескольких регионах одним запросом (батч)."""
+    def create_ip_batch(self, region: str, quantity: int) -> list[ProviderResult]:
+        """Создать несколько IP в одном регионе одним запросом."""
         url = f"{self._base}/v2/floatingips/projects/{self._project_id}"
-        payload = {
-            "floatingips": [
-                {"quantity": qty, "region": region}
-                for region, qty in per_region.items()
-            ]
-        }
+        payload = {"floatingips": [{"quantity": quantity, "region": region}]}
 
         resp = self._request("POST", url, json=payload)
 
@@ -231,7 +226,7 @@ class SelectelProvider(BaseProvider):
             ProviderResult(
                 ip=fip["floating_ip_address"],
                 resource_id=fip["id"],
-                region=fip.get("region", ""),
+                region=fip.get("region", region),
                 raw=fip,
             )
             for fip in fips
@@ -239,7 +234,7 @@ class SelectelProvider(BaseProvider):
         ]
 
         if not results:
-            raise RuntimeError("Selectel: пустой ответ floatingips")
+            raise RuntimeError(f"Batch: 0 IP создано из {quantity} (возможно квота)")
 
         return results
 
