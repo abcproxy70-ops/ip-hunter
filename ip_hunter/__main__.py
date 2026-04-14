@@ -236,14 +236,12 @@ def main() -> None:
         log_err("Ни один провайдер не инициализирован.")
         sys.exit(1)
 
-    # Назначаем limiter'ы одним проходом — proxy_groups уже финальные
+    # Каждый аккаунт получает свой лимитер — потолок находится автоматически по 429
     active: list[tuple[BaseProvider, dict, AdaptiveRateLimiter]] = []
     for p, acc_cfg, pk in initialized:
-        n_on_proxy = proxy_groups.get(pk, 1)
-        effective_rpm = max(4, cfg.rpm_limit // n_on_proxy)
-        limiter = AdaptiveRateLimiter(rpm_max=effective_rpm)
+        limiter = AdaptiveRateLimiter(rpm_start=60)
         active.append((p, acc_cfg, limiter))
-        log_info(f"✓ {acc_cfg.get('label', '?')} (rpm={effective_rpm})")
+        log_info(f"✓ {acc_cfg.get('label', '?')}")
 
     flat_cfg = {
         "attempts_per_provider": cfg.attempts_per_provider,
