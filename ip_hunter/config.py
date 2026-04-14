@@ -195,15 +195,19 @@ def interactive_setup(cfg: Config) -> Config:
     if _ask_bool("\nВключить Reg.ru?", cfg.regru.get("enabled", False)):
         cfg.regru["enabled"] = True
         ext = cfg.regru.setdefault("extra", {})
-        ext["login"] = _ask("Login (email)", ext.get("login", ""))
-        ext["password"] = _ask("Password", ext.get("password", ""))
+        print("\n  Авторизация через cookies (SESSION_ID + JWT):")
+        print("  1. Залогиньтесь на cloud.reg.ru в браузере")
+        print("  2. DevTools (F12) → Application → Cookies → cloud.reg.ru")
+        print("  3. Скопируйте: SESSION_ID=...; JWT=...")
+        print("  (JWT протухает, но обновится автоматически через SESSION_ID)\n")
+        cfg.regru["token"] = _ask("Cookies (SESSION_ID=...; JWT=...)", cfg.regru.get("token", ""))
         ext["service_id"] = _ask("Service ID (cloud VPS)", ext.get("service_id", ""))
         ext["region"] = _ask("Region", ext.get("region", "openstack-msk1"))
         ext["image"] = _ask("Image", ext.get("image", "ubuntu-24-04-amd64"))
-        ext["plan"] = _ask("Plan", ext.get("plan", "c2-m2-d20-hp"))
+        ext["plan"] = _ask("Plan", ext.get("plan", "c1-m1-d10-hp"))
         ext["extra_accounts"] = ext.get("extra_accounts", [])
         while _ask_bool("Добавить ещё аккаунт Reg.ru?", False):
-            acc = {"login": _ask("Login"), "password": _ask("Password"),
+            acc = {"token": _ask("Cookies (SESSION_ID=...; JWT=...)"),
                    "service_id": _ask("Service ID")}
             ext["extra_accounts"].append(acc)
     else:
